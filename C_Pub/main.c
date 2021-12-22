@@ -1,7 +1,6 @@
 #define PORT 32100
 #define IP_ADDR "127.0.0.1"
 
-
 #include "com.h"
 #include "gps.h"
 
@@ -10,12 +9,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 
 int fd;
 char read_buffer[BUFFER_SIZE];
 int read_buffer_size, now;
 
+
+int from_degrees_to_decimal(char *degrees, double *decimal) 
+{
+    // GPS coordinates are given in a weird format between degrees and decimal.
+    // This function translates that to decimal
+
+    int i = 0;
+    int spacePos=0;
+    char lat_int[4] = "    ";       //Important to clean rubbish 
+    char lat_dec[10] = "          ";//Important to clean rubbish
+    insert_array(degrees);
+
+    while (degrees[i] != '\0') {
+        if (degrees[i] == ' ') {  // If we find the space that separates the first value with the second one
+            spacePos = i;
+        }
+        else if (spacePos == 0) {             // If we are in the degrees part
+            lat_int[i] = degrees[i];
+        }
+        else {                                // If we are in the minutes part
+            lat_dec[i-spacePos-1] = degrees[i];
+        }
+        i++;
+    }
+
+    *decimal = atof(lat_int) + atof(lat_dec)/60;
+    return 0;
+}
 
 
 int main()
@@ -41,18 +69,30 @@ int main()
     return 1; 
   }
 
-  while (1) {
+  double latitude = 0.0;
+  double longitude = 0.0;
+
+  while (1) {   //Endless loop that every 1s gets new data from serial bus
     memset(read_buffer,0, BUFFER_SIZE);
     read_buffer_size= read_Buffer(fd, read_buffer);
     if(read_buffer_size > 0){
       read_GPS_Data(read_buffer);
       parse_GpsDATA();
       if(Save_Data.ParseData_Flag == 1 && Save_Data.Usefull_Flag ==1){
-        insert_array(Save_Data.Slatitude);
-        insert_array(Save_Data.Slongitude);
-        printf("%s,%s\n",Save_Data.Slatitude, Save_Data.Slongitude);
+
+        from_degrees_to_decimal(Save_Data.Slatitude, &latitude); 
+        from_degrees_to_decimal(Save_Data.Slongitude, &longitude); 
+
+        if (*Save_Data.N_S == 'S') {
+            latitude=latitude*-1;
+        }
+        if (*Save_Data.E_W == 'W') {
+            longitude=longitude*-1;
+        }
+        // printf("DOUBLE: %f, %f\n",latitude,longitude);
+        // printf("STRING: %s,%s\n",Save_Data.Slatitude, Save_Data.Slongitude);
         
-        sprintf(sendline, "%s,%s\n", Save_Data.Slatitude, Save_Data.Slongitude); 
+        sprintf(sendline, "%f,%f\n", latitude, longitude); 
         sendto(sockfd,sendline,strlen(sendline),0,
              (struct sockaddr *)&servaddr,sizeof(servaddr));
 
@@ -62,6 +102,7 @@ int main()
         printf("Invalid GPS data\n");
       }
     }
+    usleep(100); // Sleep for 0.1s to save resources
   }
   close(fd);
   return 1;
